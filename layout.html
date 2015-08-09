@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        canvas {
+            background: #1e8dff;
+        }
+    </style>
+</head>
+<body>
+
+<!-- TODO(vveidelis) is this a good way to define a such template? -->
+<script id="layout_template" type="text/x-template">
+Wrapper
+-Layout(minWidth=768,minHeight=1024,color=#111)
+--GridRow(height=0.30,color=#111)
+---TrafficLights(width=0.30,color=#444)
+---Chat(width=0.70,color=#555)
+--GridRow(height=0.50,color=#111)
+---BetSpot(color=#eee)
+--GridRow(height=0.20,color=#111)
+---Undo(width=0.20,color=#888)
+---ChipStack(width=0.60,color=#888)
+----Chip(width=0.33,color=#fff)
+----Chip(width=0.33,color=#fff)
+----Chip(width=0.33,color=#fff)
+---Repeat(width=0.20,color=#888)
+-</script>
+
+<script>
+
+    var Node = {
+        id: undefined,
+        children: [],
+        height: 0,
+        parent: null,
+        width: 0,
+        name: "",
+        x: null,
+        y: null,
+        init: function (name, width, height) {
+            this.id = getRandomId();
+            this.children = [];
+            this.name = name;
+            this.width = width;
+            this.height = height;
+            return this;
+        }
+    };
+
+    var parseNodeProperties = function (properties) {
+        var pairs = properties.split(","),
+            result = {},
+            pieces;
+
+        for (var i = 0; i < pairs.length; i++) {
+            pieces = pairs[i].split("=");
+            result[pieces[0]] = pieces[1];
+        }
+
+        return result;
+    };
+
+    var getRandomId = function () {
+        return (Math.random().toString(36) + "00000000000000000").slice(2, 12);
+    };
+
+    // TODO(vveidelis) take into account Layout node properties
+    // and choose appropriate layout based on screen dimensions
+    var parseTemplate = function(template) {
+        var width = document.body.clientWidth,
+            height = document.body.clientHeight,
+            lines = template.toString().split(/\n/).slice(1, -1),
+            rootNode = Object.create(Node).init("Wrapper", width, height),
+            currentNode = rootNode,
+            lastLineDepth = -1,
+            currentLineDepth = 0,
+            depthDifference,
+            tempNode,
+            properties,
+            i;
+
+        for(i = 1; i < lines.length; i++ ) {
+            lastLineDepth = currentLineDepth;
+            currentLineDepth = lines[i].match(/^[-]*/g)[0].length;
+            tempNode = Object.create(Node);
+            tempNode.id = getRandomId();
+            tempNode.name = lines[i].replace(/-/g, "");
+            tempNode.children = [];
+
+            if (currentLineDepth > lastLineDepth) {
+                tempNode.parent = currentNode;
+                currentNode.children.push(tempNode);
+                currentNode = tempNode;
+            } else if (currentLineDepth < lastLineDepth) {
+                depthDifference = lastLineDepth - currentLineDepth;
+                while (depthDifference--) {
+                    currentNode = currentNode.parent;
+                }
+                currentNode.parent.children.push(tempNode);
+                tempNode.parent = currentNode.parent;
+                currentNode = tempNode;
+            } else {
+                tempNode.parent = currentNode.parent;
+                currentNode.parent.children.push(tempNode);
+                currentNode = tempNode;
+            }
+
+            // TODO(vveidelis) have a list of default properties and assign the automatically
+            properties = parseNodeProperties(currentNode.name.replace(/^[a-z]*/gi, "").slice(1, -1)),
+            currentNode.color = properties.color;
+            currentNode.widthPercent = properties.width ? parseFloat(properties.width) : 1,
+            currentNode.heightPercent = properties.height ? parseFloat(properties.height) : 1;
+            currentNode.width = currentNode.parent.width * currentNode.widthPercent;
+            currentNode.height = currentNode.parent.height * currentNode.heightPercent;
+        }
+
+        return rootNode;
+    };
+
+    var walkTree = function (tree, callback) {
+        var stack = [tree],
+            currentNode;
+
+        while (currentNode = stack.shift()) {
+            if (callback(currentNode) === false) {
+                return;
+            }
+            stack = stack.concat(currentNode.children);
+        }
+    };
+
+    // TODO(vveidelis) add support for more complex layouts, also properties like padding and/or margin
+    var getNodePosition = function (node) {
+        var nodeChildIndex,
+            position;
+
+        if (!node.parent) {
+            return { x: 0, y: 0 };
+        }
+
+        position = {
+            x: node.parent.x,
+            y: node.parent.y
+        };
+
+        // find index of current node in children array
+        node.parent.children.some(function (child, index) {
+            if (!child.id) {
+                throw new Error("node id is not set");
+            }
+            if (child.id === node.id) {
+                nodeChildIndex = index;
+                return true;
+            }
+        });
+
+        node.parent.children.slice(0, nodeChildIndex).forEach(function (childBeforeCurrentNode) {
+            // if child before current node is 100% width, move it down instead of moving it to right
+            if (childBeforeCurrentNode.widthPercent == 1) {
+                position.y += childBeforeCurrentNode.height;
+            } else {
+                position.x += childBeforeCurrentNode.width;
+            }
+        });
+
+        return position;
+    };
+
+    var drawLayout = function (tree, ctx) {
+        walkTree(tree, function (node) {
+            ctx.fillStyle = node.color;
+            ctx.fillRect(node.x, node.y, node.width, node.height);
+        });
+    }
+
+    window.addEventListener("DOMContentLoaded", function () {
+        var tree = parseTemplate(document.querySelector("#layout_template").innerText),
+            canvas = document.querySelector("#canvas"),
+            context = canvas.getContext("2d");
+
+        canvas.width = document.body.clientWidth;
+        canvas.height = document.body.clientHeight;
+
+        // update position of each node in the tree
+        walkTree(tree, function (node) {
+            var position = getNodePosition(node);
+
+            node.x = position.x;
+            node.y = position.y;
+        });
+
+        // visually test if layout is correct
+        drawLayout(tree, context);
+
+        console.log("tree", tree);
+    });
+</script>
+
+<canvas id="canvas"></canvas>
+</body>
+</html>
